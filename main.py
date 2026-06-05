@@ -158,6 +158,65 @@ async def english_exam_chat(request: EnglishChatRequest):
     return StreamingResponse(generate(), media_type="text/plain")
 
 
+@app.post("/api/english-exam/upload")
+async def english_exam_upload(
+    file: UploadFile = File(...),
+    level: Optional[str] = Form(None),
+    history: Optional[str] = Form(None),
+):
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    file_bytes = await file.read()
+    content_type = file.content_type or ""
+    filename = file.filename or ""
+
+    system = ENGLISH_EXAM_PROMPT
+    if level:
+        system += f"\n\nThe student has selected level: **{level}**. Adapt all responses to this level."
+
+    history_messages = []
+    if history:
+        try:
+            parsed = json.loads(history)
+            for m in parsed:
+                history_messages.append({"role": m["role"], "content": m["content"]})
+        except Exception:
+            pass
+
+    if content_type.startswith("image/") or filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+        b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
+        media_type = content_type if content_type.startswith("image/") else "image/jpeg"
+        user_content = [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+            {"type": "text", "text": "This is an image from my English exam or study notes. Please read the content carefully. If it contains exam questions, provide model answers. If it contains student answers, correct them with detailed feedback and a score out of 20. If it's study notes, summarize and create practice questions."},
+        ]
+    else:
+        if filename.lower().endswith(".pdf"):
+            text = extract_text_from_pdf(file_bytes)
+        elif filename.lower().endswith(".docx"):
+            text = extract_text_from_docx(file_bytes)
+        else:
+            text = file_bytes.decode("utf-8", errors="replace")
+        user_content = f"This is the content of the file **{filename}**:\n\n{text}\n\nPlease analyze this English exam file. If it contains questions, provide model answers. If it contains student answers, correct them with detailed feedback and scores. If it's study material, summarize it and create relevant practice questions."
+
+    messages = history_messages + [{"role": "user", "content": user_content}]
+
+    claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+    def generate():
+        with claude.messages.stream(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=system,
+            messages=messages,
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+
+    return StreamingResponse(generate(), media_type="text/plain")
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "model": MODEL}
