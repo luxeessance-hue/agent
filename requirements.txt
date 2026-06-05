@@ -1,7 +1,7 @@
 anthropic
 streamlit
-fastapi==0.115.5
-uvicorn[standard]==0.32.1
+fastapi
+uvicorn[standard]
 openai==1.57.0
 python-multipart==0.0.12
 python-dotenv==1.0.1
