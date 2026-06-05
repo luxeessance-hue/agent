@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import fitz  # PyMuPDF
+import anthropic
 from docx import Document
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -109,6 +110,52 @@ def build_system(subject: Optional[str]) -> str:
     if subject:
         system += f"\n\nالمادة المختارة: **{subject}**. ركّز إجاباتك على هذه المادة إلا إذا طلب الطالب غير ذلك."
     return system
+
+
+ENGLISH_EXAM_PROMPT = """You are an expert English exam agent for Moroccan university students at Bac+3 level.
+Your role:
+- Generate realistic English university exams (grammar, writing, vocabulary, oral prep)
+- Cover all question types: MCQ, fill-in-the-blank, short essays, sentence transformation
+- Adapt to B1/B2/C1 levels
+- After generating an exam, wait for the student's answers then provide detailed correction with explanations in simple English (or Darija if asked)
+
+When the student says "generate exam [type] [topic] [level]":
+1. Create a full structured exam with 3 sections
+2. Number all questions clearly
+3. After answers are submitted, correct each one with explanation
+4. Give a final score and personalized advice
+
+Always be encouraging and explain mistakes clearly so the student learns.
+Start by asking: 'What type of exam do you need today? (grammar / writing / vocabulary / mixed)'"""
+
+
+class EnglishChatRequest(BaseModel):
+    messages: List[Message]
+    level: Optional[str] = None
+
+
+@app.post("/api/english-exam/chat")
+async def english_exam_chat(request: EnglishChatRequest):
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    system = ENGLISH_EXAM_PROMPT
+    if request.level:
+        system += f"\n\nThe student has selected level: **{request.level}**. Adapt all exams and explanations to this level."
+
+    claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+    def generate():
+        with claude.messages.stream(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": m.role, "content": m.content} for m in request.messages],
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+
+    return StreamingResponse(generate(), media_type="text/plain")
 
 
 @app.get("/api/health")
