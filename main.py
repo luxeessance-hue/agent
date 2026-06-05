@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import List, Optional
 
 import fitz  # PyMuPDF
-import anthropic
 from docx import Document
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -136,24 +135,27 @@ class EnglishChatRequest(BaseModel):
 
 @app.post("/api/english-exam/chat")
 async def english_exam_chat(request: EnglishChatRequest):
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
     system = ENGLISH_EXAM_PROMPT
     if request.level:
         system += f"\n\nThe student has selected level: **{request.level}**. Adapt all exams and explanations to this level."
 
-    claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    messages = [{"role": "system", "content": system}]
+    messages += [{"role": m.role, "content": m.content} for m in request.messages]
 
-    def generate():
-        with claude.messages.stream(
-            model="claude-sonnet-4-6",
+    async def generate():
+        stream = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            stream=True,
             max_tokens=4096,
-            system=system,
-            messages=[{"role": m.role, "content": m.content} for m in request.messages],
-        ) as stream:
-            for text in stream.text_stream:
-                yield text
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
 
     return StreamingResponse(generate(), media_type="text/plain")
 
@@ -200,19 +202,21 @@ async def english_exam_upload(
             text = file_bytes.decode("utf-8", errors="replace")
         user_content = f"This is the content of the file **{filename}**:\n\n{text}\n\nPlease analyze this English exam file. If it contains questions, provide model answers. If it contains student answers, correct them with detailed feedback and scores. If it's study material, summarize it and create relevant practice questions."
 
-    messages = history_messages + [{"role": "user", "content": user_content}]
+    openai_messages = [{"role": "system", "content": system}]
+    openai_messages += history_messages
+    openai_messages.append({"role": "user", "content": user_content})
 
-    claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-    def generate():
-        with claude.messages.stream(
-            model="claude-sonnet-4-6",
+    async def generate():
+        stream = client.chat.completions.create(
+            model=MODEL,
+            messages=openai_messages,
+            stream=True,
             max_tokens=4096,
-            system=system,
-            messages=messages,
-        ) as stream:
-            for text in stream.text_stream:
-                yield text
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
 
     return StreamingResponse(generate(), media_type="text/plain")
 
