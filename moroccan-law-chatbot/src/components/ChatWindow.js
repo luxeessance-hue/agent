@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import Message from "./Message";
 import TypingIndicator from "./TypingIndicator";
-import { streamChat, streamEnglishExam, uploadFile } from "../api";
+import { streamChat, streamEnglishExam, uploadFile, uploadEnglishExamFile } from "../api";
 import { SUBJECTS } from "./Sidebar";
 
 export default function ChatWindow({
@@ -79,7 +79,7 @@ export default function ChatWindow({
   }
 
   function processFile(file) {
-    if (loading || isEnglish) return;
+    if (loading) return;
     const fileName = file.name;
     const userMsg = { role: "user", content: `📎 Uploaded: **${fileName}**`, file: fileName };
     const newMessages = [...messages, userMsg];
@@ -90,29 +90,31 @@ export default function ChatWindow({
     const assistantId = Date.now();
     setMessages([...newMessages, { role: "assistant", content: "", id: assistantId }]);
 
-    uploadFile(
-      file, subjectLabel, historyForApi,
-      (chunk) => {
-        assistantText += chunk;
-        setMessages((prev) =>
-          prev.map((m) => m.id === assistantId ? { ...m, content: assistantText } : m)
-        );
-      },
-      () => setLoading(false),
-      (err) => {
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== assistantId),
-          { role: "error", content: `Error: ${err}` },
-        ]);
-        setLoading(false);
-      }
-    );
+    const onChunk = (chunk) => {
+      assistantText += chunk;
+      setMessages((prev) =>
+        prev.map((m) => m.id === assistantId ? { ...m, content: assistantText } : m)
+      );
+    };
+    const onDone = () => setLoading(false);
+    const onError = (err) => {
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== assistantId),
+        { role: "error", content: `Error: ${err}` },
+      ]);
+      setLoading(false);
+    };
+
+    if (isEnglish) {
+      uploadEnglishExamFile(file, selectedLevel, historyForApi, onChunk, onDone, onError);
+    } else {
+      uploadFile(file, subjectLabel, historyForApi, onChunk, onDone, onError);
+    }
   }
 
   function handleDrop(e) {
     e.preventDefault();
     setDragging(false);
-    if (isEnglish) return;
     const file = e.dataTransfer.files?.[0];
     if (file) processFile(file);
   }
@@ -129,7 +131,7 @@ export default function ChatWindow({
   return (
     <main
       className={`chat-window ${dragging ? "drag-over" : ""}`}
-      onDragOver={(e) => { e.preventDefault(); if (!isEnglish) setDragging(true); }}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
     >
@@ -176,7 +178,7 @@ export default function ChatWindow({
             <div className="welcome-grid">
               <div className="welcome-card"><span>📝</span><p>Generate full exams: grammar, writing, vocabulary, or mixed</p></div>
               <div className="welcome-card"><span>🎯</span><p>Pick a level (B1/B2/C1) and exam type from the sidebar</p></div>
-              <div className="welcome-card"><span>✅</span><p>Submit your answers and get detailed corrections with scores</p></div>
+              <div className="welcome-card"><span>📎</span><p>Upload a PDF exam or photo of your answers for instant correction</p></div>
               <div className="welcome-card"><span>💬</span><p>Ask in English or Darija — I'll always explain clearly</p></div>
             </div>
           </div>
@@ -201,16 +203,14 @@ export default function ChatWindow({
 
       <div className="input-area">
         <div className="input-bar">
-          {!isEnglish && (
-            <button
-              className="attach-btn"
-              onClick={() => fileInputRef.current?.click()}
-              title="Upload PDF, DOCX, or image"
-              disabled={loading}
-            >
-              📎
-            </button>
-          )}
+          <button
+            className="attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            title={isEnglish ? "Upload exam PDF, DOCX, or photo" : "Upload PDF, DOCX, or image"}
+            disabled={loading}
+          >
+            📎
+          </button>
           <textarea
             className="chat-input"
             placeholder={
@@ -241,7 +241,7 @@ export default function ChatWindow({
           onChange={handleFileChange}
         />
         <div className="input-hint">
-          Enter to send · Shift+Enter for new line{!isEnglish && " · Drag & drop files"}
+          Enter to send · Shift+Enter for new line · Drag &amp; drop files
         </div>
       </div>
     </main>
