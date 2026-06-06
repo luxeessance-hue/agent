@@ -166,8 +166,8 @@ async def english_exam_upload(
     level: Optional[str] = Form(None),
     history: Optional[str] = Form(None),
 ):
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+    if not os.getenv("OPENAI_API_KEY"):
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
 
     file_bytes = await file.read()
     content_type = file.content_type or ""
@@ -190,7 +190,7 @@ async def english_exam_upload(
         b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
         media_type = content_type if content_type.startswith("image/") else "image/jpeg"
         user_content = [
-            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+            {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}},
             {"type": "text", "text": "This is an image from my English exam or study notes. Please read the content carefully. If it contains exam questions, provide model answers. If it contains student answers, correct them with detailed feedback and a score out of 20. If it's study notes, summarize and create practice questions."},
         ]
     else:
